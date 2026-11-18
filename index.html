@@ -48,12 +48,16 @@ table.j td.c{text-align:center}
 table.j img{width:130px;display:block;margin:3px auto}
 .empty{padding:30px;text-align:center;color:var(--mu)}
 @media print{
- header.top,.tabs,#ed,.noprint{display:none!important}
+ header.top,.tabs,#ed,#sv,#rb,#toast,.noprint{display:none!important}
  body,main{background:#fff;padding:0;margin:0;max-width:none}
  .wrap{border:0;padding:0;overflow:visible}.doc{min-width:0}
  table.j th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
  tr{break-inside:avoid}thead{display:table-header-group}
 }
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#1b2430;color:#fff;padding:9px 16px;border-radius:10px;z-index:20;font-size:14px;display:none;max-width:90vw}
+#rb{display:none;background:var(--ac2);border:1px solid var(--ac);border-radius:10px;padding:10px 14px;margin-bottom:14px}
+.ok{color:#1e8e3e;font-weight:600}.wn{color:#b36b00;font-weight:600}
+.fl span{display:inline-block;border:1px solid var(--bd);border-radius:8px;padding:7px 12px;cursor:pointer}
 </style>
 <style id="pg">@page{size:330mm 216mm landscape;margin:12mm}</style>
 </head>
@@ -61,11 +65,13 @@ table.j img{width:130px;display:block;margin:3px auto}
 <header class="top">
  <h1>📒 Jurnal Kegiatan Harian Guru</h1>
  <span id="st"></span>
+ <button id="bs">💾 Simpan</button>
  <button class="p" id="bx">⬇ Unduh Excel (.xlsx)</button>
  <button id="bp">🖨 Cetak / PDF</button>
 </header>
 <main>
- <div class="tabs"><button data-tab="ed" class="on">✏️ Isi Jurnal</button><button data-tab="pv">👁 Pratinjau Dokumen</button></div>
+ <div class="tabs"><button data-tab="ed" class="on">✏️ Isi Jurnal</button><button data-tab="pv">👁 Pratinjau Dokumen</button><button data-tab="sv">💾 Simpan</button></div>
+ <div id="rb">Ada pembaruan dari perangkat lain. <button class="p" id="rbb">Muat pembaruan</button></div>
 
  <section id="ed">
   <div class="box"><div class="grid">
@@ -82,10 +88,22 @@ table.j img{width:130px;display:block;margin:3px auto}
   <datalist id="dlT"></datalist><datalist id="dlK"></datalist>
  </section>
 
+ <section id="sv" hidden>
+  <div class="box"><h3 style="margin:0 0 8px">Status penyimpanan</h3><p id="svs" style="margin:0 0 12px"></p><button class="p" id="bs2">💾 Simpan sekarang</button>
+   <p class="hint" style="margin-bottom:0">Perubahan otomatis tersimpan beberapa detik setelah Anda berhenti mengetik. Tombol ini memaksa simpan seketika.</p></div>
+  <div class="box"><h3 style="margin:0 0 8px">Cadangan ke file</h3><p class="hint" style="margin-top:0">Simpan semua bulan ke satu file .json, atau pulihkan dari file tersebut. Berguna sebagai arsip, atau jika perangkat tidak bisa memakai cloud. Foto yang tersimpan di cloud tidak ikut terbawa ke file (hanya teksnya).</p>
+   <button id="bj">⬇ Simpan cadangan (.json)</button> <label class="fl"><span>⬆ Buka cadangan</span><input type="file" id="bi" accept=".json,application/json" hidden></label></div>
+  <div class="box"><h3 style="margin:0 0 8px">Agar sama di HP, laptop, dan akun lain</h3>
+   <ol class="hint" style="margin:0;padding-left:20px"><li>Buka halaman ini di claude.ai dalam keadaan login. Data otomatis tersimpan ke cloud dan sama di semua perangkat dengan akun itu.</li>
+   <li>Untuk <b>email/akun lain</b>: pemilik klik <b>Bagikan</b> di halaman artifact, lalu undang email tersebut sebagai <b>Editor</b> (atau Contributor). Jangan aktifkan tautan publik, karena pengunjung dari luar hanya bisa membaca.</li>
+   <li>Buka tautan di perangkat lain dan masuk dengan email yang diundang. Perubahan muncul otomatis.</li></ol></div>
+ </section>
+
  <section id="pv" hidden>
   <div class="wrap"><div class="doc" id="doc"></div></div>
  </section>
 </main>
+<div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script>
@@ -96,9 +114,61 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const pd=s=>{const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
 const fmt=s=>{const t=pd(s);return `${HARI[t.getDay()]}, ${t.getDate()} ${BLN[t.getMonth()]} ${t.getFullYear()}`};
-const DEF={judul:'JURNAL KEGIATAN HARIAN GURU',sekolah:'SMA NEGERI 10 PANDEGLANG',guru:'',ym:new Date().toISOString().slice(0,7),paper:'legal',data:{}};
+const DEF={judul:'JURNAL KEGIATAN HARIAN GURU',sekolah:'SMA NEGERI 10 PANDEGLANG',guru:'',ym:new Date().toISOString().slice(0,7),paper:'legal',data:{},t:{},dirty:{}};
 let S;try{S={...DEF,...JSON.parse(localStorage.getItem('jg1')||'{}')}}catch(e){S={...DEF}}
-let tm;const save=()=>{clearTimeout(tm);tm=setTimeout(()=>{try{localStorage.setItem('jg1',JSON.stringify(S));$('#st').textContent='✓ Tersimpan otomatis'}catch(e){$('#st').textContent='⚠ Penyimpanan penuh — unduh Excel sekarang'}},300)};
+let DB=null,US=null,AS=null,DL=null,CAN=true,Q=Promise.resolve(),tm,PEND=null,uM=null,lastOk='';
+const DEV=Math.random().toString(36).slice(2,8),ph=p=>p.id?'/_blob/'+p.id:p.s,clone=x=>JSON.parse(JSON.stringify(x));
+function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast.i);toast.i=setTimeout(()=>t.style.display='none',3800)}
+function setSt(k,m){
+ const T={cloud:`<span class="ok">☁ Tersimpan di cloud${lastOk?' · '+lastOk:''}</span> — terbuka di semua perangkat yang punya akses`,busy:'⏳ Menyimpan…',local:'<span class="wn">💾 Tersimpan hanya di browser ini</span> — cloud tidak aktif di tampilan ini (belum login claude.ai atau tidak punya akses)',ro:'<span class="wn">🔒 Akses hanya-baca</span> — minta pemilik menjadikan Anda Editor/Contributor agar bisa menyimpan ke cloud',err:`<span class="wn">⚠ Gagal sinkron${m?' ('+esc(m)+')':''}</span> — data tetap aman di browser ini; coba Simpan lagi`};
+ $('#svs').innerHTML=T[k];$('#st').innerHTML=T[k].replace(/ — .*/,'')}
+function persist(){try{localStorage.setItem('jg1',JSON.stringify(S));return true}catch(e){return false}}
+const save=k=>{if(k=='c')S.dirty._cfg=true;else S.dirty[S.ym]=true;clearTimeout(tm);setSt('busy');tm=setTimeout(flush,800)};
+async function flush(){
+ clearTimeout(tm);const ok=persist();
+ if(!DB){setSt('local');if(!ok)toast('Penyimpanan browser penuh — unduh cadangan .json');return}
+ if(!CAN){setSt('ro');return}
+ setSt('busy');
+ try{Q=Q.catch(()=>{}).then(push);await Q;lastOk=new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});setSt('cloud')}catch(e){setSt('err',e&&(e.code||e.message))}
+}
+const d2b=s=>{const[a,b]=s.split(','),u=Uint8Array.from(atob(b),c=>c.charCodeAt(0));return new Blob([u],{type:a.slice(5,a.indexOf(';'))})};
+async function migrate(k){if(!AS)return;for(const d of S.data[k]||[])for(const a of d.a)for(const p of a.p)if(p.s&&!p.id){try{const r=await AS.upload(d2b(p.s));p.id=r.id;delete p.s}catch(e){}}}
+async function push(){
+ for(const k of Object.keys(S.dirty)){if(!S.dirty[k])continue;S.dirty[k]=false;
+  try{const t=Date.now();
+   if(k=='_cfg')await DB.doc('pengaturan/umum').set({t,dev:DEV,judul:S.judul,sekolah:S.sekolah,guru:S.guru,paper:S.paper});
+   else{await migrate(k);await DB.doc('jurnal/'+k).set({t,dev:DEV,days:clone(S.data[k]||[])})}
+   S.t[k]=t}catch(e){S.dirty[k]=true;throw e}}
+ persist();
+}
+function merge(cl,lo){const m=new Map(clone(cl||[]).map(d=>[d.d,d]));clone(lo||[]).forEach(d=>{if(!m.has(d.d))m.set(d.d,d)});return[...m.values()]}
+function applyRemote(ym,d){S.data[ym]=clone(d.days||[]);S.t[ym]=d.t;PEND=null;$('#rb').style.display='none';persist();if(ym==S.ym){renderEd();toast('Diperbarui dari perangkat lain')}}
+function subCfg(){DB.doc('pengaturan/umum').onSnapshot(s=>{
+ if(!s.exists){if(CAN&&!S.dirty._cfg&&S.t._cfg===undefined){S.dirty._cfg=true;flush()}return}
+ const d=s.data();if(d.dev===DEV){S.t._cfg=Math.max(S.t._cfg||0,d.t);return}
+ if(d.t<=(S.t._cfg||0)||S.dirty._cfg)return;
+ ['judul','sekolah','guru','paper'].forEach(id=>{if(d[id]!==undefined){S[id]=d[id];if(document.activeElement.id!=id)$('#'+id).value=S[id]}});
+ S.t._cfg=d.t;persist();renderEd()},e=>setSt('err',e.code))}
+function subMonth(){uM&&uM();const ym=S.ym;uM=DB.doc('jurnal/'+ym).onSnapshot(s=>{
+ if(ym!=S.ym)return;
+ if(!s.exists){if(CAN&&cur().length&&S.t[ym]===undefined){S.dirty[ym]=true;flush()}return}
+ const d=s.data();
+ if(d.dev===DEV){S.t[ym]=Math.max(S.t[ym]||0,d.t);return}
+ if(d.t<=(S.t[ym]||0)||S.dirty[ym])return;
+ if(S.t[ym]===undefined&&cur().length){S.data[ym]=merge(d.days,cur());S.t[ym]=d.t;S.dirty[ym]=true;renderEd();flush();return}
+ if(document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#days')){PEND={ym,d};$('#rb').style.display='block';return}
+ applyRemote(ym,d)},e=>setSt('err',e.code))}
+async function initCloud(){
+ const to=new Promise(r=>setTimeout(()=>r(null),10000)),u=n=>Promise.race([Promise.resolve(window.claude&&window.claude.use?window.claude.use(n):null),to]).catch(()=>null);
+ [DB,US,AS,DL]=await Promise.all(['db','user','assets','downloads'].map(u));
+ if(US&&US.can){try{CAN=(await US.can('data.write'))!==false}catch(e){}}
+ if(!DB){setSt('local');return}
+ setSt(CAN?'busy':'ro');subCfg();subMonth();
+ setTimeout(()=>{if(CAN&&!Object.values(S.dirty).some(Boolean))setSt('cloud')},1500);
+}
+async function saveFile(name,data){if(!DL){toast('Fitur unduh tidak tersedia di tampilan ini');return false}
+ try{await DL.save({filename:name,data});return true}catch(e){if(e.code!='declined')toast('Gagal mengunduh ('+(e.code||e.message)+')');return false}}
+async function b64(p){if(p.s)return p.s;try{const b=await(await fetch(ph(p))).blob();return await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)})}catch(e){return null}}
 const cur=()=>S.data[S.ym]||(S.data[S.ym]=[]);
 const sorted=()=>[...cur()].sort((a,b)=>a.d.localeCompare(b.d)).filter(d=>d.a.length);
 const info=()=>{const[y,m]=S.ym.split('-').map(Number);const g=m>=7;return{y,m,bulan:BLN[m-1],sem:g?'Ganjil':'Genap',tp:g?`${y}/${y+1}`:`${y-1}/${y}`}};
@@ -116,7 +186,7 @@ function renderEd(){
   <div><label>Refleksi</label><textarea data-i="${i}" data-j="${j}" data-f="r">${esc(a.r)}</textarea></div>
   <div><label>Tindak lanjut</label><textarea data-i="${i}" data-j="${j}" data-f="f">${esc(a.f)}</textarea></div>
   <div class="row"><label style="cursor:pointer;margin:0"><span style="display:inline-block;border:1px solid var(--bd);border-radius:8px;padding:7px 12px;color:var(--tx);font-weight:400">📷 Tambah foto dokumentasi</span><input type="file" accept="image/*" multiple hidden data-i="${i}" data-j="${j}" data-act="photo"></label>
-  ${a.p.map((p,k)=>`<span class="th"><img src="${p.s}" alt=""><b data-act="delPh" data-i="${i}" data-j="${j}" data-k="${k}">×</b></span>`).join('')}
+  ${a.p.map((p,k)=>`<span class="th"><img src="${ph(p)}" alt=""><b data-act="delPh" data-i="${i}" data-j="${j}" data-k="${k}">×</b></span>`).join('')}
   <span style="flex:1"></span><button data-act="dup" data-i="${i}" data-j="${j}">⎘ Duplikat</button><button class="d" data-act="delAct" data-i="${i}" data-j="${j}">Hapus</button></div></div>`).join('')}
  <button data-act="addAct" data-i="${i}">+ Kegiatan di hari ini</button></div>`).join(''):'<div class="box empty">Belum ada kegiatan bulan ini. Klik “+ Tambah hari”.</div>';
  const all=Object.values(S.data).flat().flatMap(d=>d.a),u=f=>[...new Set(all.map(a=>a[f].trim()).filter(Boolean))].map(v=>`<option value="${esc(v)}">`).join('');
@@ -125,7 +195,7 @@ function renderEd(){
 
 function docHTML(){
  const{y,bulan,sem,tp}=info(),ds=sorted();
- let rows=ds.map((d,n)=>d.a.map((a,j)=>`<tr>${j?'':`<td class="c" rowspan="${d.a.length}">${n+1}</td><td class="c" rowspan="${d.a.length}">${esc(fmt(d.d))}</td>`}<td class="c">${esc(a.t)}</td><td class="c">${esc(a.k)}</td><td>${esc(a.e)}</td><td>${esc(a.r)}</td><td>${esc(a.f)}</td><td>${a.p.map(p=>`<img src="${p.s}" alt="">`).join('')}</td></tr>`).join('')).join('');
+ let rows=ds.map((d,n)=>d.a.map((a,j)=>`<tr>${j?'':`<td class="c" rowspan="${d.a.length}">${n+1}</td><td class="c" rowspan="${d.a.length}">${esc(fmt(d.d))}</td>`}<td class="c">${esc(a.t)}</td><td class="c">${esc(a.k)}</td><td>${esc(a.e)}</td><td>${esc(a.r)}</td><td>${esc(a.f)}</td><td>${a.p.map(p=>`<img src="${ph(p)}" alt="">`).join('')}</td></tr>`).join('')).join('');
  if(!rows)rows='<tr><td colspan="8" class="empty">Belum ada data</td></tr>';
  return `<div class="kop"><img src="${LOGO_L}" alt=""><div><h2>${esc(S.judul)}</h2><h3>${esc(S.sekolah)}</h3><h3>Semester ${sem} Tahun Pelajaran ${tp}</h3>${S.guru?`<h4>Nama Guru : ${esc(S.guru)}</h4>`:''}</div><img src="${LOGO_R}" alt=""></div>
  <p class="bl">BULAN : ${bulan.toUpperCase()} ${y}</p>
@@ -133,11 +203,11 @@ function docHTML(){
 }
 function renderPv(){$('#doc').innerHTML=docHTML();$('#pg').textContent=`@page{size:${S.paper=='a4'?'297mm 210mm':'330mm 216mm'} landscape;margin:12mm}`}
 
-function tab(t){document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('on',b.dataset.tab==t));$('#ed').hidden=t!='ed';$('#pv').hidden=t!='pv';if(t=='pv')renderPv();scrollTo(0,0)}
+function tab(t){document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('on',b.dataset.tab==t));$('#ed').hidden=t!='ed';$('#pv').hidden=t!='pv';$('#sv').hidden=t!='sv';if(t=='pv')renderPv();scrollTo(0,0)}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 
-['judul','sekolah','guru','paper'].forEach(id=>{$('#'+id).value=S[id];$('#'+id).oninput=e=>{S[id]=e.target.value;save()}});
-$('#ym').value=S.ym;$('#ym').onchange=e=>{if(!e.target.value)return;S.ym=e.target.value;save();renderEd()};
+['judul','sekolah','guru','paper'].forEach(id=>{$('#'+id).value=S[id];$('#'+id).oninput=e=>{S[id]=e.target.value;save('c')}});
+$('#ym').value=S.ym;$('#ym').onchange=e=>{if(!e.target.value)return;S.ym=e.target.value;persist();renderEd();if(DB)subMonth()};
 
 const days=()=>cur().sort((a,b)=>a.d.localeCompare(b.d));
 $('#days').addEventListener('input',e=>{const t=e.target,{i,j,f}=t.dataset;if(!f||f=='d')return;days()[i].a[j][f]=t.value;save()});
@@ -145,7 +215,7 @@ $('#days').addEventListener('change',e=>{const t=e.target;if(t.dataset.f=='d'&&t
 document.addEventListener('click',async e=>{
  const t=e.target.closest('[data-act]');if(!t||t.tagName=='INPUT')return;const{act,i,j,k}=t.dataset,D=days();
  if(act=='addDay'){const{y,m}=info(),l=D.length?pd(D[D.length-1].d):new Date(y,m-1,0);l.setDate(l.getDate()+1);let s=l.getFullYear()+'-'+String(l.getMonth()+1).padStart(2,'0')+'-'+String(l.getDate()).padStart(2,'0');if(s.slice(0,7)!=S.ym)s=S.ym+'-01';cur().push({d:s,a:[blank()]})}
- else if(act=='delDay'){if(!confirm('Hapus hari ini beserta semua kegiatannya?'))return;D.splice(i,1)}
+ else if(act=='delDay'){if(!t.dataset.arm){t.dataset.arm=1;t.textContent='Klik lagi untuk menghapus';setTimeout(()=>{delete t.dataset.arm;t.textContent='Hapus hari'},3000);return}D.splice(i,1)}
  else if(act=='addAct')D[i].a.push(blank());
  else if(act=='dup')D[i].a.splice(+j+1,0,{...D[i].a[j],p:[]});
  else if(act=='delAct'){D[i].a.splice(j,1);if(!D[i].a.length)D.splice(i,1)}
@@ -155,15 +225,18 @@ document.addEventListener('click',async e=>{
 });
 $('#days').addEventListener('change',async e=>{
  const t=e.target;if(t.dataset.act!='photo')return;
- for(const f of t.files)days()[t.dataset.i].a[t.dataset.j].p.push(await shrink(f));
+ const tg=days()[t.dataset.i].a[t.dataset.j].p;
+ for(const f of t.files){const p=await shrink(f);
+  if(AS){try{const r=await AS.upload(p.b);tg.push({id:r.id,w:p.w,h:p.h});continue}catch(er){toast('Unggah foto ke cloud gagal; foto disimpan lokal')}}
+  tg.push({s:p.s,w:p.w,h:p.h})}
  save();renderEd();
 });
-function shrink(file){return new Promise(res=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,480/im.width),w=Math.round(im.width*k),h=Math.round(im.height*k),c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);res({s:c.toDataURL('image/jpeg',.72),w,h})};im.src=r.result};r.readAsDataURL(file)})}
+function shrink(file){return new Promise(res=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,480/im.width),w=Math.round(im.width*k),h=Math.round(im.height*k),c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);c.toBlob(b=>res({b,s:c.toDataURL('image/jpeg',.72),w,h}),'image/jpeg',.72)};im.src=r.result};r.readAsDataURL(file)})}
 
 $('#bp').onclick=()=>{tab('pv');setTimeout(()=>print(),150)};
 
 $('#bx').onclick=async()=>{
- if(!window.ExcelJS){alert('Pustaka Excel belum termuat. Periksa koneksi internet lalu coba lagi.');return}
+ if(!window.ExcelJS){toast('Pustaka Excel belum termuat. Periksa koneksi internet lalu coba lagi.');return}
  const{y,bulan,sem,tp}=info(),ds=sorted(),wb=new ExcelJS.Workbook(),B={style:'thin'},bd={top:B,left:B,bottom:B,right:B};
  const ws=wb.addWorksheet(bulan.toUpperCase(),{pageSetup:{orientation:'landscape',paperSize:S.paper=='a4'?9:5,fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'7:7',margins:{left:.7,right:.7,top:.75,bottom:.75,header:.3,footer:.3}}});
  const W=[5,17,12,27,30,30,30,24];ws.columns=W.map(width=>({width}));
@@ -182,13 +255,23 @@ $('#bx').onclick=async()=>{
   r++});
   if(d.a.length>1){ws.mergeCells(r0,1,r-1,1);ws.mergeCells(r0,2,r-1,2)}
  });
- imgs.forEach(m=>{const id=wb.addImage({base64:m.p.s,extension:'jpeg'});ws.addImage(id,{tl:{nativeCol:7,nativeRow:m.r-1,nativeColOff:9525*12,nativeRowOff:9525*m.off},ext:{width:IW,height:m.h},editAs:'oneCell'})});
+ for(const m of imgs){const bb=await b64(m.p);if(!bb)continue;const id=wb.addImage({base64:bb,extension:'jpeg'});ws.addImage(id,{tl:{nativeCol:7,nativeRow:m.r-1,nativeColOff:9525*12,nativeRowOff:9525*m.off},ext:{width:IW,height:m.h},editAs:'oneCell'})}
  const lg=(u,col,off)=>{const id=wb.addImage({base64:u,extension:'png'});ws.addImage(id,{tl:{nativeCol:col,nativeRow:0,nativeColOff:9525*off,nativeRowOff:9525*4},ext:{width:92,height:92},editAs:'oneCell'})};
  if(LOGO_L.startsWith('data:'))lg(LOGO_L,2,60);if(LOGO_R.startsWith('data:'))lg(LOGO_R,6,30);
- const buf=await wb.xlsx.writeBuffer(),a=document.createElement('a');
- a.href=URL.createObjectURL(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));a.download=`Jurnal_${bulan}_${y}.xlsx`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+ const buf=await wb.xlsx.writeBuffer();
+ if(await saveFile(`Jurnal_${bulan}_${y}.xlsx`,new Blob([buf])))toast('Excel siap disimpan ✓');
 };
-renderEd();
+const doSave=async()=>{S.dirty._cfg=true;S.dirty[S.ym]=true;await flush();toast(DB&&CAN?'Tersimpan ke cloud ✓':'Tersimpan di browser ini ✓')};
+$('#bs').onclick=doSave;$('#bs2').onclick=doSave;$('#rbb').onclick=()=>PEND&&applyRemote(PEND.ym,PEND.d);
+$('#bj').onclick=async()=>{const data={};for(const k in S.data)if(S.data[k].length)data[k]=S.data[k];
+ if(await saveFile(`Cadangan_Jurnal_${new Date().toISOString().slice(0,10)}.json`,JSON.stringify({v:1,judul:S.judul,sekolah:S.sekolah,guru:S.guru,paper:S.paper,data})))toast('Cadangan disimpan ✓')};
+$('#bi').onchange=async e=>{const f=e.target.files[0];if(!f)return;
+ try{const j=JSON.parse(await f.text());if(!j.data)throw 0;
+  for(const k in j.data){S.data[k]=merge(j.data[k],S.data[k]);S.dirty[k]=true}
+  ['judul','sekolah','guru','paper'].forEach(id=>{if(j[id]!==undefined){S[id]=j[id];$('#'+id).value=S[id]}});
+  S.dirty._cfg=true;persist();renderEd();await flush();toast('Cadangan dimuat')}catch(er){toast('File cadangan tidak valid')}
+ e.target.value=''};
+renderEd();initCloud();
 </script>
 </body>
 </html>
